@@ -1,0 +1,16 @@
+[package]
+name = "mirror-console"
+version = "0.1.0"
+edition = "2021"
+description = "Local-only Android mirroring & control console built on adb + scrcpy. No cloud, no licensing."
+license = "Apache-2.0"
+
+[[bin]]
+name = "mconsole"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

@@ -1,0 +1,85 @@
+name: macOS build (mconsole + WDA ipa)
+
+# Builds the macOS binary always. The iPhone-side .ipa is an opt-in job because
+# it needs Apple signing secrets — trigger it from the Actions tab with
+# "Run workflow" and build_ipa = true.
+
+on:
+  push:
+    branches:
+      - claude/app-analysis-decompilation-q87e2w
+      - main
+    paths:
+      - mirror-console/**
+      - .github/workflows/macos-build.yml
+  workflow_dispatch:
+    inputs:
+      build_ipa:
+        description: "Also build & sign the WebDriverAgent .ipa (needs secrets)"
+        type: boolean
+        default: false
+
+jobs:
+  macos-binary:
+    name: mconsole (macOS universal)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: mirror-console
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust + Apple targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build universal binary
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p dist
+          lipo -create -output dist/mconsole \
+            target/aarch64-apple-darwin/release/mconsole \
+            target/x86_64-apple-darwin/release/mconsole
+          file dist/mconsole
+          ./dist/mconsole version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mconsole-macos-universal
+          path: mirror-console/dist/mconsole
+          if-no-files-found: error
+
+  ios-ipa:
+    name: WebDriverAgentRunner (.ipa)
+    if: github.event_name == 'workflow_dispatch' && inputs.build_ipa
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: mirror-console
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preconditions
+        run: |
+          if [ -z "$APPLE_TEAM_ID" ] || [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ]; then
+            echo "Missing secrets. Add repo secrets: APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_API_KEY_BASE64" >&2
+            exit 1
+          fi
+      - name: Write App Store Connect API key
+        run: |
+          echo "${{ secrets.ASC_API_KEY_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/asc_key.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/asc_key.p8" >> "$GITHUB_ENV"
+      - name: Build & package .ipa
+        run: |
+          chmod +x build-wda-ipa-macos.sh
+          ./build-wda-ipa-macos.sh "$APPLE_TEAM_ID"
+      - name: Clean up API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc_key.p8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgentRunner-ipa
+          path: mirror-console/dist/WebDriverAgentRunner.ipa
+          if-no-files-found: error

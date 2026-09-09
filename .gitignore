@@ -1,0 +1,5 @@
+target/
+dist/mconsole
+dist/Payload/
+dist/WebDriverAgentRunner.xcarchive/
+third_party/WebDriverAgent/
